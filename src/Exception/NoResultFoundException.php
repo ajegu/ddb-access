@@ -2,8 +2,7 @@
 
 namespace Ajegu\DdbAccess\Exception;
 
-
-class NoResultFoundException extends AbstractException
+class NoResultFoundException extends DDBAccessException
 {
 
 }

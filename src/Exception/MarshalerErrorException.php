@@ -2,7 +2,7 @@
 
 namespace Ajegu\DdbAccess\Exception;
 
-class MarshalerErrorException extends AbstractException
+class MarshalerErrorException extends DDBAccessException
 {
 
 }

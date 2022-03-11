@@ -5,13 +5,13 @@ namespace Ajegu\DdbAccess\Contract;
 use Ajegu\DdbAccess\Exception\DynamoDbErrorException;
 use Ajegu\DdbAccess\Exception\MarshalerErrorException;
 
-interface DynamoDbAccessServiceInterface
+interface DDBAccessInterface
 {
     /**
-     * @param string $partitionKeyValue
-     * @return array
+     * @param QueryInterface $query
+     * @return ResultInterface
      * @throws DynamoDbErrorException
      * @throws MarshalerErrorException
      */
-    public function findAll(string $partitionKeyValue): array;
+    public function findAll(QueryInterface $query): ResultInterface;
 }

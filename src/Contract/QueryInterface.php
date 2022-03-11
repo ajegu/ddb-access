@@ -2,9 +2,12 @@
 
 namespace Ajegu\DdbAccess\Contract;
 
+use Ajegu\DdbAccess\Model\Direction;
+
 interface QueryInterface
 {
-    public function getTableName(): string;
-    public function getPartitionKeyName(): string;
     public function getPartitionKeyValue(): string;
+    public function getCursor(): ?string;
+    public function getDirection(): Direction;
+    public function getPageSize(): ?int;
 }

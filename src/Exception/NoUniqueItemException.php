@@ -2,7 +2,7 @@
 
 namespace Ajegu\DdbAccess\Exception;
 
-class NoUniqueItemException extends AbstractException
+class NoUniqueItemException extends DDBAccessException
 {
 
 }
