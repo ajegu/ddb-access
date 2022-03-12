@@ -59,4 +59,25 @@ class MarshalerAdapter
             throw new MarshalerErrorException($message);
         }
     }
+
+    /**
+     * @param array $item
+     * @return array
+     * @throws MarshalerErrorException
+     */
+    public function marshalItem(array $item): array
+    {
+        try {
+            return $this->marshaler->marshalItem($item);
+        } catch (UnexpectedValueException $exception) {
+            $message = 'The item can not be marshalled.';
+
+            $this->logger->error($message, [
+                'item' => $item,
+                'exception' => $exception->getMessage()
+            ]);
+
+            throw new MarshalerErrorException($message);
+        }
+    }
 }

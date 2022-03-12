@@ -5,32 +5,50 @@ namespace Ajegu\DdbAccess;
 use Ajegu\DdbAccess\Adapter\DynamoDbAdapter;
 use Ajegu\DdbAccess\Adapter\MarshalerAdapter;
 use Ajegu\DdbAccess\Contract\DDBAccessInterface;
+use Ajegu\DdbAccess\Contract\ItemBuilderInterface;
 use Ajegu\DdbAccess\Contract\QueryInterface;
 use Ajegu\DdbAccess\Contract\ResultInterface;
 use Ajegu\DdbAccess\Exception\DDBAccessException;
 use Ajegu\DdbAccess\Model\Direction;
+use Ajegu\DdbAccess\Model\Event;
 use Ajegu\DdbAccess\Model\Result;
 use Ajegu\DdbAccess\Service\CursorService;
+use Ajegu\DdbAccess\Service\EventService;
+use Psr\Log\LoggerInterface;
 
 class DDBAccess implements DDBAccessInterface
 {
+    private CursorService $cursorService;
+    private EventService $eventService;
+
     /**
      * @param DynamoDbAdapter $dynamoDbAdapter
      * @param MarshalerAdapter $marshalerAdapter
-     * @param CursorService $cursorService
+     * @param LoggerInterface $logger
      * @param string $tableName DynamoDb table name
      * @param string $partitionKeyName DynamoDb partition key name
      * @param string $sortKeyName DynamoDb partition key name
+     * @param ItemBuilderInterface[] $builders
      */
     public function __construct(
-        private DynamoDbAdapter $dynamoDbAdapter,
+        private DynamoDbAdapter  $dynamoDbAdapter,
         private MarshalerAdapter $marshalerAdapter,
-        private CursorService $cursorService,
-        private string          $tableName,
-        private string          $partitionKeyName,
-        private string          $sortKeyName,
+        private LoggerInterface  $logger,
+        private string           $tableName,
+        private string           $partitionKeyName,
+        private string           $sortKeyName,
+        private iterable         $builders = [],
     )
     {
+        $this->cursorService = new CursorService(
+            $this->logger,
+            $this->partitionKeyName,
+            $this->sortKeyName
+        );
+
+        $this->eventService = new EventService(
+            $this->builders
+        );
     }
 
     /**
@@ -44,9 +62,12 @@ class DDBAccess implements DDBAccessInterface
 
         $args = [
             'TableName' => $this->tableName,
-            'KeyConditionExpression' => $this->partitionKeyName .' = :partitionKeyValue',
+            'KeyConditionExpression' => $this->partitionKeyName . ' = :partitionKeyValue',
             'ExpressionAttributeValues' => [
                 ':partitionKeyValue' => $partitionKeyMarshalled
+            ],
+            'ExpressionAttributeNames' => [
+                '#partitionKeyName' => $this->partitionKeyName
             ]
         ];
 
@@ -61,7 +82,7 @@ class DDBAccess implements DDBAccessInterface
         }
 
         if ($pageSize = $query->getPageSize()) {
-            $args['Limit'] =$pageSize;
+            $args['Limit'] = $pageSize;
         }
 
         // Call DynamoDb
@@ -90,12 +111,19 @@ class DDBAccess implements DDBAccessInterface
         $cursor = $this->cursorService->build($items, $query, $lastEvaluatedKey);
 
         // Unmarshal the result items
-        $items = array_map(function(array $item) {
-            return $this->marshalerAdapter->unmarshalItem($item);
+        $items = array_map(function (array $item) {
+            $item = $this->marshalerAdapter->unmarshalItem($item);
+
+            return $this->eventService->dispatch(
+                $item,
+                $item[$this->partitionKeyName],
+                $item[$this->sortKeyName],
+                Event::AFTER_QUERY
+            );
         }, $items);
 
         // Order the items by sort key and direction
-        usort($items, function($a, $b) use ($query) {
+        usort($items, function ($a, $b) use ($query) {
             if ($query->getDirection() === Direction::ASC) {
                 return $a[$this->sortKeyName] > $b[$this->sortKeyName];
             }
@@ -104,5 +132,26 @@ class DDBAccess implements DDBAccessInterface
         });
 
         return new Result($items, $cursor);
+    }
+
+    /**
+     * @param string $partitionKeyValue
+     * @param string $sortKeyValue
+     * @param array $item
+     * @return void
+     * @throws DDBAccessException
+     */
+    public function save(string $partitionKeyValue, string $sortKeyValue, array $item): void
+    {
+        $item = $this->eventService->dispatch($item, $partitionKeyValue, $sortKeyValue, Event::BEFORE_SAVE);
+        $item[$this->partitionKeyName] = $partitionKeyValue;
+        $item[$this->sortKeyName] = $sortKeyValue;
+
+        $args = [
+            'TableName' => $this->tableName,
+            'Item' => $this->marshalerAdapter->marshalItem($item)
+        ];
+
+        $this->dynamoDbAdapter->putItem($args);
     }
 }

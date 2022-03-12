@@ -39,4 +39,25 @@ class DynamoDbAdapter
             throw new DynamoDbErrorException($message);
         }
     }
+
+    /**
+     * @param array $args
+     * @return void
+     * @throws DynamoDbErrorException
+     */
+    public function putItem(array $args): void
+    {
+        try {
+            $this->dynamoDbClient->putItem($args);
+        } catch (DynamoDbException $exception) {
+            $message = 'The item can not be saved.';
+
+            $this->logger->error($message, [
+                'args' => $args,
+                'exception' => $exception->getMessage()
+            ]);
+
+            throw new DynamoDbErrorException($message);
+        }
+    }
 }
