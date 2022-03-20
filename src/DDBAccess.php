@@ -8,6 +8,7 @@ use Ajegu\DdbAccess\Contract\DDBAccessInterface;
 use Ajegu\DdbAccess\Contract\ItemBuilderInterface;
 use Ajegu\DdbAccess\Contract\QueryInterface;
 use Ajegu\DdbAccess\Contract\ResultInterface;
+use Ajegu\DdbAccess\Contract\TableDefinitionInterface;
 use Ajegu\DdbAccess\Exception\DDBAccessException;
 use Ajegu\DdbAccess\Model\Direction;
 use Ajegu\DdbAccess\Model\Event;
@@ -25,25 +26,21 @@ class DDBAccess implements DDBAccessInterface
      * @param DynamoDbAdapter $dynamoDbAdapter
      * @param MarshalerAdapter $marshalerAdapter
      * @param LoggerInterface $logger
-     * @param string $tableName DynamoDb table name
-     * @param string $partitionKeyName DynamoDb partition key name
-     * @param string $sortKeyName DynamoDb partition key name
-     * @param ItemBuilderInterface[] $builders
+     * @param TableDefinitionInterface $tableDefinition
+     * @param iterable $builders
      */
     public function __construct(
         private DynamoDbAdapter  $dynamoDbAdapter,
         private MarshalerAdapter $marshalerAdapter,
         private LoggerInterface  $logger,
-        private string           $tableName,
-        private string           $partitionKeyName,
-        private string           $sortKeyName,
+        private TableDefinitionInterface $tableDefinition,
         private iterable         $builders = [],
     )
     {
         $this->cursorService = new CursorService(
             $this->logger,
-            $this->partitionKeyName,
-            $this->sortKeyName
+            $this->tableDefinition->getPartitionKey(),
+            $this->tableDefinition->getSortKey()
         );
 
         $this->eventService = new EventService(
@@ -58,18 +55,22 @@ class DDBAccess implements DDBAccessInterface
      */
     public function findAll(QueryInterface $query): ResultInterface
     {
-        $partitionKeyMarshalled = $this->marshalerAdapter->marshalValue($query->getPartitionKeyValue());
-
         $args = [
-            'TableName' => $this->tableName,
-            'KeyConditionExpression' => $this->partitionKeyName . ' = :partitionKeyValue',
+            'TableName' => $this->tableDefinition->getTable(),
+            'KeyConditionExpression' => '#partitionKeyName = :partitionKeyValue',
             'ExpressionAttributeValues' => [
-                ':partitionKeyValue' => $partitionKeyMarshalled
+                ':partitionKeyValue' => $this->marshalerAdapter->marshalValue($query->getPartitionKey())
             ],
             'ExpressionAttributeNames' => [
-                '#partitionKeyName' => $this->partitionKeyName
+                '#partitionKeyName' => $this->tableDefinition->getPartitionKey()
             ]
         ];
+
+        if ($sortKeyValue = $query->getSortKey()) {
+            $args['KeyConditionExpression'] .= ' AND begins_with(#sortKeyName, :sortKeyValue)';
+            $args['ExpressionAttributeValues'][':sortKeyValue'] = $this->marshalerAdapter->marshalValue($sortKeyValue);
+            $args['ExpressionAttributeNames']['#sortKeyName'] = $this->tableDefinition->getSortKey();
+        }
 
         if ($query->getDirection() === Direction::DESC) {
             $args['ScanIndexForward'] = false;
@@ -94,11 +95,11 @@ class DDBAccess implements DDBAccessInterface
             $result = $this->dynamoDbAdapter->query($args);
 
             foreach ($result->get('Items') as $item) {
+                $items[] = $item;
                 if (count($items) === $query->getPageSize()) {
                     $stop = true;
                     break;
                 }
-                $items[] = $item;
             }
 
             if ($lastEvaluatedKey = $result->get('LastEvaluatedKey')) {
@@ -106,6 +107,16 @@ class DDBAccess implements DDBAccessInterface
             }
         } while ($lastEvaluatedKey && !$stop);
 
+        // We must evaluate the last key to know if we are more items
+        if ($lastEvaluatedKey) {
+            $args['ExclusiveStartKey'] = $lastEvaluatedKey;
+            $args['Limit'] = 1;
+
+            $check = $this->dynamoDbAdapter->query($args);
+            if ($check->get('Count') === 0) {
+                $lastEvaluatedKey = null;
+            }
+        }
 
         // Build the cursor
         $cursor = $this->cursorService->build($items, $query, $lastEvaluatedKey);
@@ -116,19 +127,20 @@ class DDBAccess implements DDBAccessInterface
 
             return $this->eventService->dispatch(
                 $item,
-                $item[$this->partitionKeyName],
-                $item[$this->sortKeyName],
+                $item[$this->tableDefinition->getPartitionKey()],
+                $item[$this->tableDefinition->getSortKey()],
                 Event::AFTER_QUERY
             );
         }, $items);
 
         // Order the items by sort key and direction
         usort($items, function ($a, $b) use ($query) {
+            $sortKey = $this->tableDefinition->getSortKey();
             if ($query->getDirection() === Direction::ASC) {
-                return $a[$this->sortKeyName] > $b[$this->sortKeyName];
+                return $a[$sortKey] > $b[$sortKey];
             }
 
-            return $a[$this->sortKeyName] < $b[$this->sortKeyName];
+            return $a[$sortKey] < $b[$sortKey];
         });
 
         return new Result($items, $cursor);
@@ -144,11 +156,11 @@ class DDBAccess implements DDBAccessInterface
     public function save(string $partitionKeyValue, string $sortKeyValue, array $item): void
     {
         $item = $this->eventService->dispatch($item, $partitionKeyValue, $sortKeyValue, Event::BEFORE_SAVE);
-        $item[$this->partitionKeyName] = $partitionKeyValue;
-        $item[$this->sortKeyName] = $sortKeyValue;
+        $item[$this->tableDefinition->getPartitionKey()] = $partitionKeyValue;
+        $item[$this->tableDefinition->getSortKey()] = $sortKeyValue;
 
         $args = [
-            'TableName' => $this->tableName,
+            'TableName' => $this->tableDefinition->getTable(),
             'Item' => $this->marshalerAdapter->marshalItem($item)
         ];
 
