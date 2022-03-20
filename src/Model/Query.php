@@ -2,14 +2,17 @@
 
 namespace Ajegu\DdbAccess\Model;
 
+use Ajegu\DdbAccess\Contract\QueryIndexInterface;
 use Ajegu\DdbAccess\Contract\QueryInterface;
 
 class Query implements QueryInterface
 {
-    private string $partitionKeyValue; // DynamoDb partition key value
+    private string $partitionKey; // DynamoDb partition key value
+    private ?string $sortKey; // DynamoDb sort key value
     private ?string $cursor; // Cursor encoded value
     private Direction $direction; // ASC|DESC (default: ASC)
     private ?int $pageSize;
+    private ?QueryIndexInterface $index;
 
 
     public function __construct() {
@@ -19,17 +22,33 @@ class Query implements QueryInterface
     /**
      * @return string
      */
-    public function getPartitionKeyValue(): string
+    public function getPartitionKey(): string
     {
-        return $this->partitionKeyValue;
+        return $this->partitionKey;
     }
 
     /**
-     * @param string $partitionKeyValue
+     * @param string $partitionKey
      */
-    public function setPartitionKeyValue(string $partitionKeyValue): void
+    public function setPartitionKey(string $partitionKey): void
     {
-        $this->partitionKeyValue = $partitionKeyValue;
+        $this->partitionKey = $partitionKey;
+    }
+
+    /**
+     * @return string|null
+     */
+    public function getSortKey(): ?string
+    {
+        return $this->sortKey;
+    }
+
+    /**
+     * @param string|null $sortKey
+     */
+    public function setSortKey(?string $sortKey): void
+    {
+        $this->sortKey = $sortKey;
     }
 
     /**
@@ -80,5 +99,20 @@ class Query implements QueryInterface
         $this->pageSize = $pageSize;
     }
 
+    /**
+     * @return QueryIndexInterface|null
+     */
+    public function getIndex(): ?QueryIndexInterface
+    {
+        return $this->index;
+    }
+
+    /**
+     * @param QueryIndexInterface|null $index
+     */
+    public function setIndex(?QueryIndexInterface $index): void
+    {
+        $this->index = $index;
+    }
 
 }
